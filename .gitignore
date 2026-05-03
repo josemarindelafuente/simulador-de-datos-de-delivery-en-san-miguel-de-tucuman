@@ -25,4 +25,5 @@ Thumbs.db
 .vscode/
 
 # Generated outputs
-output_files/
+output_files/*
+!output_files/.gitkeep
