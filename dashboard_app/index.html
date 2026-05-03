@@ -1,0 +1,904 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dashboard delivery — mapa y datos</title>
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin=""
+  />
+  <style>
+    :root {
+      --bg: #0f1419;
+      --panel: #1a2332;
+      --border: #2d3a4d;
+      --text: #e7ecf3;
+      --muted: #8b9cb3;
+      --accent: #3d8bfd;
+      --rest: #e85d4c;
+      --entrega: #2ecc71;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    header {
+      padding: 0.75rem 1rem;
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.75rem;
+    }
+    header h1 {
+      margin: 0;
+      font-size: 1.1rem;
+      font-weight: 600;
+    }
+    header .hint {
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+    .layout {
+      flex: 1;
+      display: grid;
+      grid-template-columns: minmax(280px, 340px) 1fr;
+      min-height: 0;
+    }
+    @media (max-width: 900px) {
+      .layout {
+        grid-template-columns: 1fr;
+        grid-template-rows: auto 50vh;
+      }
+    }
+    aside {
+      background: var(--panel);
+      border-right: 1px solid var(--border);
+      padding: 1rem;
+      overflow: auto;
+    }
+    section h2 {
+      margin: 0 0 0.75rem;
+      font-size: 0.85rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+    }
+    .kpis {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.5rem;
+      margin-bottom: 1rem;
+    }
+    .kpi {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.6rem 0.75rem;
+    }
+    .kpi .label {
+      font-size: 0.7rem;
+      color: var(--muted);
+      margin-bottom: 0.25rem;
+    }
+    .kpi .value {
+      font-size: 1.05rem;
+      font-weight: 700;
+      color: var(--accent);
+    }
+    .kpi.wide { grid-column: 1 / -1; }
+    .filters label {
+      display: block;
+      font-size: 0.75rem;
+      color: var(--muted);
+      margin-bottom: 0.2rem;
+    }
+    .filters input,
+    .filters select {
+      width: 100%;
+      padding: 0.45rem 0.5rem;
+      margin-bottom: 0.65rem;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: var(--bg);
+      color: var(--text);
+    }
+    .filters button {
+      width: 100%;
+      padding: 0.5rem;
+      border-radius: 6px;
+      border: 1px solid var(--accent);
+      background: rgba(61, 139, 253, 0.15);
+      color: var(--accent);
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .filters button:hover {
+      background: rgba(61, 139, 253, 0.28);
+    }
+    .estados-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.35rem;
+      margin-bottom: 0.65rem;
+    }
+    .estados-row span {
+      font-size: 0.72rem;
+      padding: 0.2rem 0.45rem;
+      border-radius: 4px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      color: var(--muted);
+    }
+    #map-wrap {
+      position: relative;
+      min-height: 400px;
+    }
+    #map {
+      width: 100%;
+      height: 100%;
+      min-height: calc(100vh - 52px - 280px);
+    }
+    @media (min-width: 901px) {
+      #map { min-height: calc(100vh - 52px); }
+    }
+    .banner-error {
+      display: none;
+      margin: 0 1rem 0.75rem;
+      padding: 0.75rem 1rem;
+      background: #3d1515;
+      border: 1px solid #8b2929;
+      border-radius: 8px;
+      color: #f5c2c7;
+      font-size: 0.9rem;
+    }
+    .banner-error.visible { display: block; }
+    .table-wrap {
+      margin: 0;
+      padding: 0 1rem 1rem;
+      overflow: auto;
+      max-height: 280px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.75rem;
+    }
+    th, td {
+      padding: 0.35rem 0.5rem;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+    }
+    th {
+      background: var(--panel);
+      color: var(--muted);
+      font-weight: 600;
+      position: sticky;
+      top: 0;
+    }
+    .legend {
+      margin-top: 0.75rem;
+      font-size: 0.72rem;
+      color: var(--muted);
+      display: flex;
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+    .legend span { display: inline-flex; align-items: center; gap: 0.35rem; }
+    .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+    .dot.rest { background: var(--rest); }
+    .dot.entrega { background: var(--entrega); }
+    .leaflet-popup-content-wrapper { border-radius: 8px; }
+    .leaflet-popup-content { margin: 0.6rem 0.75rem; font-size: 0.82rem; }
+    .ruta-row {
+      margin-bottom: 0.65rem;
+      padding-top: 0.35rem;
+      border-top: 1px solid var(--border);
+    }
+    #ruta-aviso {
+      font-size: 0.68rem;
+      color: var(--muted);
+      line-height: 1.35;
+      margin-top: 0.25rem;
+    }
+    .fecha-row {
+      margin-bottom: 0.85rem;
+      padding-bottom: 0.65rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .fecha-row > label:first-child {
+      font-size: 0.78rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 0.45rem;
+    }
+    .fecha-inputs {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.45rem;
+      margin-bottom: 0.45rem;
+    }
+    .fecha-inputs .mini label {
+      font-size: 0.68rem;
+      margin-bottom: 0.15rem;
+    }
+    .fecha-hint {
+      font-size: 0.68rem;
+      color: var(--muted);
+      margin: 0.35rem 0 0;
+      line-height: 1.35;
+    }
+    .filters button.btn-fechas-todo {
+      margin-bottom: 0.35rem;
+      border-color: var(--border);
+      background: transparent;
+      color: var(--muted);
+      font-weight: 500;
+    }
+    .filters button.btn-fechas-todo:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+      background: rgba(61, 139, 253, 0.08);
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Dashboard — delivery simulado (Tucumán)</h1>
+    <span class="hint">Ejecutá <code>python dataset.py</code> · Abrí esta página con un servidor local (ver README)</span>
+  </header>
+  <div id="load-error" class="banner-error">
+    No se pudo cargar <strong>../output_files/dataset_delivery_simulado.json</strong>.
+    Probá desde la carpeta del proyecto:<br />
+    <code>python -m http.server 8080</code> y entrá a <code>http://localhost:8080/dashboard_app/index.html</code>
+  </div>
+  <div class="layout">
+    <aside>
+      <section aria-labelledby="dash-title">
+        <h2 id="dash-title">Indicadores (filtrados)</h2>
+        <div class="kpis" id="kpis">
+          <div class="kpi"><div class="label">Pedidos</div><div class="value" id="k-pedidos">—</div></div>
+          <div class="kpi"><div class="label">Restaurantes (únicos)</div><div class="value" id="k-restaurantes">—</div></div>
+          <div class="kpi"><div class="label">Ticket promedio</div><div class="value" id="k-ticket">—</div></div>
+          <div class="kpi"><div class="label">Tiempo entrega (min)</div><div class="value" id="k-tiempo">—</div></div>
+          <div class="kpi"><div class="label">Distancia media (km)</div><div class="value" id="k-dist">—</div></div>
+          <div class="kpi wide">
+            <div class="label">Estado pedido</div>
+            <div class="estados-row" id="k-estados"></div>
+          </div>
+        </div>
+      </section>
+      <section class="filters" aria-labelledby="filtros-title">
+        <h2 id="filtros-title">Filtros</h2>
+        <div class="fecha-row">
+          <label>Periodo del pedido</label>
+          <div class="fecha-inputs">
+            <div class="mini">
+              <label for="f-fecha-desde">Desde</label>
+              <input type="date" id="f-fecha-desde" />
+            </div>
+            <div class="mini">
+              <label for="f-fecha-hasta">Hasta</label>
+              <input type="date" id="f-fecha-hasta" />
+            </div>
+          </div>
+          <button type="button" id="btn-fechas-30d" class="btn-fechas-todo">
+            Últimos 30 días (predeterminado)
+          </button>
+          <button type="button" id="btn-fechas-todo" class="btn-fechas-todo">
+            Todo el periodo (primer–último pedido)
+          </button>
+          <p class="fecha-hint" id="fecha-rango-hint"></p>
+        </div>
+        <label for="q-nombre">Buscar restaurante</label>
+        <input type="search" id="q-nombre" placeholder="Nombre o parte del nombre..." autocomplete="off" />
+        <label for="f-categoria">Categoría</label>
+        <select id="f-categoria"><option value="">— Todas —</option></select>
+        <label for="f-estado">Estado pedido</label>
+        <select id="f-estado"><option value="">— Todos —</option></select>
+        <label for="f-trafico">Tráfico</label>
+        <select id="f-trafico"><option value="">— Todos —</option></select>
+        <label for="f-clima">Clima</label>
+        <select id="f-clima"><option value="">— Todos —</option></select>
+        <label for="f-franja">Franja horaria</label>
+        <select id="f-franja"><option value="">— Todas —</option></select>
+        <label for="f-vehiculo">Tipo vehículo</label>
+        <select id="f-vehiculo"><option value="">— Todos —</option></select>
+        <label for="f-prioritario">Envío prioritario</label>
+        <select id="f-prioritario"><option value="">— Todos —</option></select>
+        <button type="button" id="btn-reset">Limpiar filtros</button>
+        <div class="ruta-row">
+          <label for="sel-ruta-modo">Ruta al hacer clic en una entrega</label>
+          <select id="sel-ruta-modo">
+            <option value="recta">Línea recta (inmediato)</option>
+            <option value="osrm">Por calles — más corta en tiempo (OSRM)</option>
+          </select>
+          <div id="ruta-aviso">
+            Hacé clic en un punto verde (cliente) para trazar el recorrido hasta su restaurante.
+          </div>
+        </div>
+        <div class="legend">
+          <span><i class="dot rest"></i> Restaurante</span>
+          <span><i class="dot entrega"></i> Entrega (cliente)</span>
+        </div>
+      </section>
+    </aside>
+    <main>
+      <div id="map-wrap">
+        <div id="map" role="application" aria-label="Mapa de pedidos"></div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>ID pedido</th>
+              <th>Restaurante</th>
+              <th>Fecha</th>
+              <th>Dist. km</th>
+              <th>Monto total</th>
+              <th>Estado</th>
+            </tr>
+          </thead>
+          <tbody id="tbl-body"></tbody>
+        </table>
+      </div>
+    </main>
+  </div>
+
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+    crossorigin=""
+  ></script>
+  <script>
+    const JSON_URL = "../output_files/dataset_delivery_simulado.json";
+    const TUCUMAN = [-26.8241, -65.2226];
+    const OSRM_BASE = "https://router.project-osrm.org/route/v1";
+    /** Días calendario inclusivos mostrados al cargar el mapa (hasta la fecha máxima del dataset). */
+    const MAPA_DIAS_PREDETERMINADOS = 30;
+
+    let map;
+    let layerRest = L.layerGroup();
+    let layerEnt = L.layerGroup();
+    let layerRutas = L.layerGroup();
+    let allRows = [];
+    let routesRequestId = 0;
+    let datasetDateMin = null;
+    let datasetDateMax = null;
+
+    function num(v) {
+      const n = Number(v);
+      return Number.isFinite(n) ? n : null;
+    }
+
+    function uniqueSorted(arr) {
+      return [...new Set(arr.filter(Boolean))].sort((a, b) => String(a).localeCompare(String(b), "es"));
+    }
+
+    /** Normaliza fecha_pedido a YYYY-MM-DD para comparar con inputs type=date */
+    function parseFechaPedido(row) {
+      const v = row && row.fecha_pedido;
+      if (v == null || v === "") return null;
+      const s = String(v).trim();
+      const m = s.match(/^(\d{4}-\d{2}-\d{2})/);
+      return m ? m[1] : null;
+    }
+
+    function computeDateExtent(rows) {
+      let min = null;
+      let max = null;
+      rows.forEach(function (r) {
+        const fp = parseFechaPedido(r);
+        if (!fp) return;
+        if (min === null || fp < min) min = fp;
+        if (max === null || fp > max) max = fp;
+      });
+      return { min: min, max: max };
+    }
+
+    /** Suma días a una fecha YYYY-MM-DD (UTC, sin DST). */
+    function addDaysISO(isoYYYYMMDD, deltaDays) {
+      const p = isoYYYYMMDD.split("-").map(Number);
+      const d = new Date(Date.UTC(p[0], p[1] - 1, p[2]));
+      d.setUTCDate(d.getUTCDate() + deltaDays);
+      const y = d.getUTCFullYear();
+      const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+      const day = String(d.getUTCDate()).padStart(2, "0");
+      return y + "-" + m + "-" + day;
+    }
+
+    /** Ventana de n días calendario inclusivos terminando en datasetDateMax. */
+    function setDateFilterToLastNDays(n) {
+      const desdeEl = document.getElementById("f-fecha-desde");
+      const hastaEl = document.getElementById("f-fecha-hasta");
+      if (!datasetDateMin || !datasetDateMax || n < 1) return;
+      let desde = addDaysISO(datasetDateMax, -(n - 1));
+      if (desde < datasetDateMin) desde = datasetDateMin;
+      desdeEl.value = desde;
+      hastaEl.value = datasetDateMax;
+    }
+
+    function setDateFilterToFullRange() {
+      const desde = document.getElementById("f-fecha-desde");
+      const hasta = document.getElementById("f-fecha-hasta");
+      if (datasetDateMin && datasetDateMax) {
+        desde.value = datasetDateMin;
+        hasta.value = datasetDateMax;
+      }
+    }
+
+    function initDateFilters(rows) {
+      const desde = document.getElementById("f-fecha-desde");
+      const hasta = document.getElementById("f-fecha-hasta");
+      const hint = document.getElementById("fecha-rango-hint");
+      const ext = computeDateExtent(rows);
+      datasetDateMin = ext.min;
+      datasetDateMax = ext.max;
+
+      if (!datasetDateMin || !datasetDateMax) {
+        desde.value = "";
+        hasta.value = "";
+        desde.removeAttribute("min");
+        desde.removeAttribute("max");
+        hasta.removeAttribute("min");
+        hasta.removeAttribute("max");
+        hint.textContent = "No hay fechas válidas en el dataset.";
+        return;
+      }
+
+      desde.min = datasetDateMin;
+      desde.max = datasetDateMax;
+      hasta.min = datasetDateMin;
+      hasta.max = datasetDateMax;
+
+      setDateFilterToLastNDays(MAPA_DIAS_PREDETERMINADOS);
+
+      hint.textContent =
+        "Por defecto se muestran los últimos " +
+        MAPA_DIAS_PREDETERMINADOS +
+        " días hasta el pedido más reciente (" +
+        datasetDateMax +
+        "). Datos del archivo: " +
+        datasetDateMin +
+        " → " +
+        datasetDateMax +
+        " (" +
+        rows.length +
+        " pedidos). Ajustá «Desde»/«Hasta» o usá los botones de abajo.";
+    }
+
+    function fillSelect(id, values) {
+      const el = document.getElementById(id);
+      const current = el.value;
+      const keepFirst = el.querySelector("option");
+      el.innerHTML = "";
+      el.appendChild(keepFirst.cloneNode(true));
+      values.forEach((v) => {
+        const o = document.createElement("option");
+        o.value = v;
+        o.textContent = v;
+        el.appendChild(o);
+      });
+      if (values.includes(current)) el.value = current;
+    }
+
+    function buildRestaurantsFromRows(rows) {
+      const byId = new Map();
+      rows.forEach((r) => {
+        const id = r.id_restaurante;
+        if (id == null) return;
+        if (!byId.has(id)) {
+          byId.set(id, {
+            id_restaurante: id,
+            nombre_restaurante: r.nombre_restaurante,
+            categoria_restaurante: r.categoria_restaurante,
+            lat: num(r.lat_restaurante),
+            lng: num(r.lng_restaurante),
+          });
+        }
+      });
+      return [...byId.values()].filter((x) => x.lat != null && x.lng != null);
+    }
+
+    function filterRows(rows) {
+      const q = document.getElementById("q-nombre").value.trim().toLowerCase();
+      const cat = document.getElementById("f-categoria").value;
+      const est = document.getElementById("f-estado").value;
+      const traf = document.getElementById("f-trafico").value;
+      const clim = document.getElementById("f-clima").value;
+      const fran = document.getElementById("f-franja").value;
+      const veh = document.getElementById("f-vehiculo").value;
+      const pri = document.getElementById("f-prioritario").value;
+      let desde = document.getElementById("f-fecha-desde").value;
+      let hasta = document.getElementById("f-fecha-hasta").value;
+      if (desde && hasta && desde > hasta) {
+        const t = desde;
+        desde = hasta;
+        hasta = t;
+      }
+
+      return rows.filter((r) => {
+        const fp = parseFechaPedido(r);
+        if (desde && (!fp || fp < desde)) return false;
+        if (hasta && (!fp || fp > hasta)) return false;
+        if (q && !(String(r.nombre_restaurante || "").toLowerCase().includes(q))) return false;
+        if (cat && r.categoria_restaurante !== cat) return false;
+        if (est && r.estado_pedido !== est) return false;
+        if (traf && r.trafico !== traf) return false;
+        if (clim && r.clima !== clim) return false;
+        if (fran && r.franja_horaria !== fran) return false;
+        if (veh && r.tipo_vehiculo !== veh) return false;
+        if (pri && String(r.envio_prioritario || "") !== pri) return false;
+        return true;
+      });
+    }
+
+    function updateKpis(rows) {
+      const n = rows.length;
+      const ids = new Set(rows.map((r) => r.id_restaurante).filter((x) => x != null));
+      const sumTicket = rows.reduce((s, r) => s + (num(r.monto_total) || 0), 0);
+      const sumT = rows.reduce((s, r) => s + (num(r.tiempo_real_entrega_min) || 0), 0);
+      const sumD = rows.reduce((s, r) => s + (num(r.distancia_km) || 0), 0);
+
+      document.getElementById("k-pedidos").textContent = n;
+      document.getElementById("k-restaurantes").textContent = ids.size;
+
+      document.getElementById("k-ticket").textContent =
+        n ? "$ " + Math.round(sumTicket / n).toLocaleString("es-AR") : "—";
+
+      document.getElementById("k-tiempo").textContent = n ? (sumT / n).toFixed(1) : "—";
+      document.getElementById("k-dist").textContent = n ? (sumD / n).toFixed(2) : "—";
+
+      const estadoEl = document.getElementById("k-estados");
+      estadoEl.innerHTML = "";
+      const labels = ["Entregado", "Cancelado", "Demorado"];
+      labels.forEach((lbl) => {
+        const c = rows.filter((r) => r.estado_pedido === lbl).length;
+        const pct = n ? Math.round((c / n) * 100) : 0;
+        const s = document.createElement("span");
+        s.textContent = lbl + ": " + pct + "% (" + c + ")";
+        estadoEl.appendChild(s);
+      });
+    }
+
+    function renderTable(rows) {
+      const body = document.getElementById("tbl-body");
+      body.innerHTML = "";
+      const slice = rows.slice(0, 80);
+      slice.forEach((r) => {
+        const tr = document.createElement("tr");
+        tr.innerHTML =
+          "<td>" +
+          (r.id_pedido ?? "") +
+          "</td><td>" +
+          escapeHtml(String(r.nombre_restaurante ?? "")) +
+          "</td><td>" +
+          escapeHtml(String(r.fecha_pedido ?? "")) +
+          "</td><td>" +
+          (r.distancia_km ?? "") +
+          "</td><td>" +
+          (r.monto_total != null ? "$ " + Number(r.monto_total).toLocaleString("es-AR") : "") +
+          "</td><td>" +
+          escapeHtml(String(r.estado_pedido ?? "")) +
+          "</td>";
+        body.appendChild(tr);
+      });
+      if (rows.length > 80) {
+        const tr = document.createElement("tr");
+        tr.innerHTML =
+          '<td colspan="6" style="color:var(--muted);font-style:italic">… y ' +
+          (rows.length - 80) +
+          " pedidos más (ajustá filtros para acotar)</td>";
+        body.appendChild(tr);
+      }
+    }
+
+    function escapeHtml(s) {
+      const d = document.createElement("div");
+      d.textContent = s;
+      return d.innerHTML;
+    }
+
+    function drawStraightRoute(latR, lngR, latC, lngC, popupHtml) {
+      const pl = L.polyline(
+        [
+          [latR, lngR],
+          [latC, lngC],
+        ],
+        { color: "#9aa5b8", weight: 2, opacity: 0.65, dashArray: "6 8" }
+      );
+      if (popupHtml) pl.bindPopup(popupHtml);
+      layerRutas.addLayer(pl);
+    }
+
+    async function fetchOsrmRoute(latR, lngR, latC, lngC) {
+      const q = lngR + "," + latR + ";" + lngC + "," + latC;
+      const url =
+        OSRM_BASE + "/driving/" + encodeURI(q) + "?overview=full&geometries=geojson";
+      const res = await fetch(url);
+      if (!res.ok) return null;
+      const data = await res.json();
+      if (data.code !== "Ok" || !data.routes || !data.routes[0]) return null;
+      const coords = data.routes[0].geometry && data.routes[0].geometry.coordinates;
+      if (!coords || !coords.length) return null;
+      return coords.map(function (pt) {
+        return [pt[1], pt[0]];
+      });
+    }
+
+    async function showRouteForPedido(r, requestId) {
+      const aviso = document.getElementById("ruta-aviso");
+      const latR = num(r.lat_restaurante);
+      const lngR = num(r.lng_restaurante);
+      const latC = num(r.lat_cliente);
+      const lngC = num(r.lng_cliente);
+      if (latR == null || lngR == null || latC == null || lngC == null) {
+        aviso.textContent = "Este pedido no tiene coordenadas completas.";
+        return;
+      }
+
+      layerRutas.clearLayers();
+
+      const popBase =
+        "<strong>Pedido #" +
+        (r.id_pedido ?? "") +
+        "</strong><br/>" +
+        escapeHtml(String(r.nombre_restaurante || "")) +
+        "<br/><small>Restaurante → cliente</small>";
+
+      const modo = document.getElementById("sel-ruta-modo").value;
+
+      if (modo === "recta") {
+        drawStraightRoute(latR, lngR, latC, lngC, popBase + "<br/><small>Línea recta (aprox.)</small>");
+        aviso.textContent = "Ruta en línea recta para pedido #" + (r.id_pedido ?? "") + ".";
+        map.fitBounds(L.latLngBounds(L.latLng(latR, lngR), L.latLng(latC, lngC)), {
+          padding: [48, 48],
+          maxZoom: 15,
+        });
+        return;
+      }
+
+      aviso.textContent = "Calculando ruta por calles (OSRM)…";
+      try {
+        const latlngs = await fetchOsrmRoute(latR, lngR, latC, lngC);
+        if (requestId !== routesRequestId) return;
+        if (latlngs && latlngs.length >= 2) {
+          const pl = L.polyline(latlngs, {
+            color: "#3498db",
+            weight: 3,
+            opacity: 0.82,
+          });
+          pl.bindPopup(popBase + "<br/><small>Por calles (OSRM driving, tiempo mínimo aprox.)</small>");
+          layerRutas.addLayer(pl);
+          map.fitBounds(pl.getBounds(), { padding: [48, 48], maxZoom: 15 });
+          aviso.textContent = "Ruta por calles para pedido #" + (r.id_pedido ?? "") + ".";
+        } else {
+          drawStraightRoute(
+            latR,
+            lngR,
+            latC,
+            lngC,
+            popBase + "<br/><small>OSRM sin resultado — línea recta</small>"
+          );
+          map.fitBounds(L.latLngBounds(L.latLng(latR, lngR), L.latLng(latC, lngC)), {
+            padding: [48, 48],
+            maxZoom: 15,
+          });
+          aviso.textContent = "No hubo ruta OSRM; se muestra línea recta.";
+        }
+      } catch (e) {
+        if (requestId !== routesRequestId) return;
+        drawStraightRoute(
+          latR,
+          lngR,
+          latC,
+          lngC,
+          popBase + "<br/><small>Error OSRM — línea recta</small>"
+        );
+        map.fitBounds(L.latLngBounds(L.latLng(latR, lngR), L.latLng(latC, lngC)), {
+          padding: [48, 48],
+          maxZoom: 15,
+        });
+        aviso.textContent = "Falló OSRM; se muestra línea recta.";
+      }
+    }
+
+    function drawMarkers(filtered) {
+      layerRest.clearLayers();
+      layerEnt.clearLayers();
+
+      const rests = buildRestaurantsFromRows(filtered);
+      const restIcon = L.divIcon({
+        className: "rest-marker",
+        html: '<div style="width:12px;height:12px;border-radius:50%;background:#e85d4c;border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.4)"></div>',
+        iconSize: [12, 12],
+        iconAnchor: [6, 6],
+      });
+      const entIcon = L.divIcon({
+        className: "ent-marker",
+        html: '<div style="width:10px;height:10px;border-radius:50%;background:#2ecc71;border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.4)"></div>',
+        iconSize: [10, 10],
+        iconAnchor: [5, 5],
+      });
+
+      rests.forEach((r) => {
+        const m = L.marker([r.lat, r.lng], { icon: restIcon });
+        m.bindPopup(
+          "<strong>Restaurante</strong><br/>" +
+            escapeHtml(String(r.nombre_restaurante)) +
+            "<br/><small>" +
+            escapeHtml(String(r.categoria_restaurante || "")) +
+            " · ID " +
+            r.id_restaurante +
+            "</small>"
+        );
+        layerRest.addLayer(m);
+      });
+
+      filtered.forEach((r) => {
+        const la = num(r.lat_cliente);
+        const lo = num(r.lng_cliente);
+        if (la == null || lo == null) return;
+        const m = L.marker([la, lo], { icon: entIcon });
+        m.bindPopup(
+          "<strong>Pedido #" +
+            (r.id_pedido ?? "") +
+            "</strong><br/>" +
+            escapeHtml(String(r.nombre_restaurante || "")) +
+            "<br/><small>" +
+            (r.distancia_km != null ? r.distancia_km + " km · " : "") +
+            (r.monto_total != null ? "$ " + Number(r.monto_total).toLocaleString("es-AR") : "") +
+            "<br/>" +
+            escapeHtml(String(r.estado_pedido || "")) +
+            "<br/><em style=\"opacity:.85\">Clic en el punto: ruta al restaurante</em>" +
+            "</small>"
+        );
+        m.on("click", function () {
+          routesRequestId += 1;
+          const rid = routesRequestId;
+          showRouteForPedido(r, rid);
+        });
+        layerEnt.addLayer(m);
+      });
+
+      const bounds = L.latLngBounds([]);
+      layerRest.eachLayer((ly) => {
+        if (ly.getLatLng) bounds.extend(ly.getLatLng());
+      });
+      layerEnt.eachLayer((ly) => {
+        if (ly.getLatLng) bounds.extend(ly.getLatLng());
+      });
+      if (bounds.isValid()) {
+        map.fitBounds(bounds, { padding: [40, 40], maxZoom: 14 });
+      } else {
+        map.setView(TUCUMAN, 12);
+      }
+    }
+
+    function refresh() {
+      const elDesde = document.getElementById("f-fecha-desde");
+      const elHasta = document.getElementById("f-fecha-hasta");
+      if (elDesde.value && elHasta.value && elDesde.value > elHasta.value) {
+        const t = elDesde.value;
+        elDesde.value = elHasta.value;
+        elHasta.value = t;
+      }
+
+      const filtered = filterRows(allRows);
+      updateKpis(filtered);
+      renderTable(filtered);
+      routesRequestId += 1;
+      layerRutas.clearLayers();
+      const aviso = document.getElementById("ruta-aviso");
+      aviso.textContent =
+        "Hacé clic en un punto verde (cliente) para trazar el recorrido hasta su restaurante.";
+      drawMarkers(filtered);
+    }
+
+    function initMap() {
+      map = L.map("map", { zoomControl: true }).setView(TUCUMAN, 12);
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxZoom: 19,
+        attribution: "&copy; OpenStreetMap",
+      }).addTo(map);
+
+      layerRest.addTo(map);
+      layerEnt.addTo(map);
+      layerRutas.addTo(map);
+
+      L.control.layers(
+        {},
+        {
+          Restaurantes: layerRest,
+          Entregas: layerEnt,
+          Rutas: layerRutas,
+        },
+        { collapsed: false }
+      ).addTo(map);
+    }
+
+    function populateFilterOptions(rows) {
+      fillSelect("f-categoria", uniqueSorted(rows.map((r) => r.categoria_restaurante)));
+      fillSelect("f-estado", uniqueSorted(rows.map((r) => r.estado_pedido)));
+      fillSelect("f-trafico", uniqueSorted(rows.map((r) => r.trafico)));
+      fillSelect("f-clima", uniqueSorted(rows.map((r) => r.clima)));
+      fillSelect("f-franja", uniqueSorted(rows.map((r) => r.franja_horaria)));
+      fillSelect("f-vehiculo", uniqueSorted(rows.map((r) => r.tipo_vehiculo)));
+      fillSelect("f-prioritario", uniqueSorted(rows.map((r) => r.envio_prioritario)));
+    }
+
+    async function load() {
+      initMap();
+
+      try {
+        const res = await fetch(JSON_URL);
+        if (!res.ok) throw new Error(String(res.status));
+        allRows = await res.json();
+        if (!Array.isArray(allRows)) throw new Error("JSON inválido");
+      } catch (e) {
+        document.getElementById("load-error").classList.add("visible");
+        allRows = [];
+        refresh();
+        return;
+      }
+
+      populateFilterOptions(allRows);
+      initDateFilters(allRows);
+
+      [
+        "q-nombre",
+        "f-categoria",
+        "f-estado",
+        "f-trafico",
+        "f-clima",
+        "f-franja",
+        "f-vehiculo",
+        "f-prioritario",
+        "f-fecha-desde",
+        "f-fecha-hasta",
+      ].forEach((id) => {
+        document.getElementById(id).addEventListener("input", refresh);
+        document.getElementById(id).addEventListener("change", refresh);
+      });
+
+      document.getElementById("btn-fechas-30d").addEventListener("click", function () {
+        setDateFilterToLastNDays(MAPA_DIAS_PREDETERMINADOS);
+        refresh();
+      });
+
+      document.getElementById("btn-fechas-todo").addEventListener("click", function () {
+        setDateFilterToFullRange();
+        refresh();
+      });
+
+      document.getElementById("btn-reset").addEventListener("click", () => {
+        document.getElementById("q-nombre").value = "";
+        document.getElementById("f-categoria").value = "";
+        document.getElementById("f-estado").value = "";
+        document.getElementById("f-trafico").value = "";
+        document.getElementById("f-clima").value = "";
+        document.getElementById("f-franja").value = "";
+        document.getElementById("f-vehiculo").value = "";
+        document.getElementById("f-prioritario").value = "";
+        setDateFilterToLastNDays(MAPA_DIAS_PREDETERMINADOS);
+        refresh();
+      });
+
+      refresh();
+    }
+
+    load();
+  </script>
+</body>
+</html>
