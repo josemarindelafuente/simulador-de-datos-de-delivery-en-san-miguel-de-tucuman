@@ -34,17 +34,74 @@ Dependencias principales: `pandas`, `numpy`, `openpyxl` (para exportar `.xlsx`).
 
 ## Ejecución
 
+Comando básico:
+
 ```powershell
 python dataset.py
 ```
 
-Por defecto usa semilla **42** (resultados reproducibles). Parámetros opcionales:
+El script genera los archivos en `output_files/` y, por defecto, usa:
 
-```text
+- `--seed 42`
+- `--pedidos 10000`
+- `--restaurantes 97`
+- `--clientes 500`
+- `--fecha-desde 2025-11-01`
+- `--fecha-hasta 2026-05-01`
+
+Por defecto se generan **10 000** pedidos con fechas entre **2025-11-01** y **2026-05-01** (el día final inclusive hasta las 23:59:59).
+
+### Parámetros principales
+
+- `--pedidos`: cantidad total de filas/pedidos a generar.
+  - ejemplo: `--pedidos 5000` genera un dataset más chico (más rápido).
+  - ejemplo: `--pedidos 50000` genera más volumen para análisis más robustos.
+- `--seed`: semilla aleatoria para reproducibilidad.
+  - si usás la misma semilla y los mismos parámetros, obtenés el mismo dataset.
+  - si cambiás la semilla, cambia la muestra simulada (manteniendo la lógica del modelo).
+
+### Parámetros disponibles en `dataset.py`
+
+- `--seed` (int): semilla del generador aleatorio.
+- `--pedidos` (int): cantidad de pedidos.
+- `--restaurantes` (int): cantidad de locales a usar desde el catálogo.
+- `--clientes` (int): cantidad de clientes únicos simulados.
+- `--fecha-desde` (YYYY-MM-DD): inicio del rango de fechas.
+- `--fecha-hasta` (YYYY-MM-DD): fin del rango (inclusive).
+
+### Ejemplos de uso
+
+Generación estándar (valores por defecto):
+
+```powershell
+python dataset.py
+```
+
+Menos pedidos para pruebas rápidas:
+
+```powershell
+python dataset.py --pedidos 2000
+```
+
+Más pedidos y semilla personalizada:
+
+```powershell
+python dataset.py --pedidos 30000 --seed 123
+```
+
+Mismo tamaño, distinta muestra simulada (cambia solo seed):
+
+```powershell
+python dataset.py --pedidos 30000 --seed 999
+```
+
+Ejemplo completo con varios parámetros:
+
+```powershell
 python dataset.py --seed 123 --pedidos 5000 --restaurantes 30 --clientes 500 --fecha-desde 2025-11-01 --fecha-hasta 2026-05-01
 ```
 
-Por defecto se generan **10 000** pedidos con fechas entre **2025-11-01** y **2026-05-01** (el día final inclusive hasta las 23:59:59).
+Nota: `--fecha-desde` debe ser menor o igual que `--fecha-hasta`.
 
 Columnas útiles para análisis además de las habituales: **`tiempo_esperado_min`** (valor esperado determinístico antes del shock aleatorio), **`retraso_exceso_min`** (tiempo real menos esperado si es positivo). **`dia_semana`** está en español.
 

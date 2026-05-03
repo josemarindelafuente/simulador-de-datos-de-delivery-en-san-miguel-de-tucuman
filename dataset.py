@@ -181,27 +181,56 @@ LOCALES_TUCUMAN: list[dict] = [
 
 DIAS_ES = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
 
-CATEGORIAS = [
-    "Hamburguesas",
-    "Pizza",
-    "Sushi",
-    "Empanadas",
-    "Milanesas",
-    "Comida saludable",
-    "Pollos",
-    "Pastas",
-]
+# Sesgo temporal de demanda:
+# - verano (dic/ene/feb) con mayor volumen,
+# - fin de semana por encima de días hábiles,
+# - picos horarios al mediodía y a la noche.
+PESO_MES = {
+    1: 1.35,
+    2: 1.28,
+    3: 1.02,
+    4: 1.0,
+    5: 0.97,
+    6: 0.95,
+    7: 0.96,
+    8: 0.98,
+    9: 1.0,
+    10: 1.02,
+    11: 1.08,
+    12: 1.32,
+}
+PESO_DIA_SEMANA = {
+    0: 0.9,   # Lunes
+    1: 0.94,  # Martes
+    2: 0.98,  # Miércoles
+    3: 1.03,  # Jueves
+    4: 1.12,  # Viernes
+    5: 1.32,  # Sábado
+    6: 1.26,  # Domingo
+}
+PESO_HORA = np.array(
+    [
+        0.22, 0.14, 0.08, 0.06, 0.06, 0.08,  # 00-05
+        0.2, 0.35, 0.55, 0.9, 1.2, 1.45,     # 06-11
+        1.55, 1.5, 1.35, 1.1, 0.95, 1.0,     # 12-17
+        1.18, 1.38, 1.62, 1.54, 1.22, 0.68,  # 18-23
+    ],
+    dtype=float,
+)
 
-# Precio típico por categoría (ARS ficticios; nivel medio del ticket)
-MONTO_BASE_CATEGORIA = {
-    "Hamburguesas": 6200,
-    "Pizza": 7800,
-    "Sushi": 11200,
-    "Empanadas": 4200,
-    "Milanesas": 5500,
-    "Comida saludable": 6500,
-    "Pollos": 5800,
-    "Pastas": 6800,
+# Categorías de rubro presentes en el catálogo de locales.
+CATEGORIAS_LOCALES_RAW = sorted({cat for _, _, _, _, cat in _LOCALES_RAW})
+
+# Tablas base por categoría de modelo económico.
+MONTO_BASE_CATEGORIA_MODELO = {
+    "Hamburguesas": 15200,
+    "Pizza": 20800,
+    "Sushi": 30200,
+    "Empanadas": 20000,
+    "Milanesas": 12000,
+    "Comida saludable": 15500,
+    "Pollos": 15800,
+    "Pastas": 9800,
 }
 
 CLIMAS = ["Despejado", "Nublado", "Lluvia", "Tormenta"]
@@ -210,7 +239,7 @@ MEDIOS_PAGO = ["Efectivo", "Tarjeta", "Mercado Pago"]
 
 # Envío prioritario (opcional): más caro en categorías más elaboradas; mayor ahorro de tiempo
 # en comidas rápidas vs elaboradas; la distancia reduce el ahorro posible (más difícil acortar rutas largas).
-PRIORIDAD_MULT_COSTO = {
+PRIORIDAD_MULT_COSTO_MODELO = {
     "Hamburguesas": 1.0,
     "Pizza": 1.05,
     "Empanadas": 0.92,
@@ -221,7 +250,7 @@ PRIORIDAD_MULT_COSTO = {
     "Pastas": 1.38,
 }
 # Techo de minutos que el servicio puede recortar del tiempo esperado (distancia 0, escenario ideal).
-PRIORIDAD_RED_MAX_MIN = {
+PRIORIDAD_RED_MAX_MIN_MODELO = {
     "Hamburguesas": 12.0,
     "Pizza": 11.0,
     "Empanadas": 11.5,
@@ -231,6 +260,29 @@ PRIORIDAD_RED_MAX_MIN = {
     "Sushi": 6.0,
     "Pastas": 6.5,
 }
+
+
+def _expande_por_categoria_local(tabla_modelo: dict[str, float | int]) -> dict[str, float | int]:
+    """Crea una tabla que incluya categorías de modelo y categorías crudas de _LOCALES_RAW."""
+    tabla = dict(tabla_modelo)
+    for cat_local in CATEGORIAS_LOCALES_RAW:
+        cat_modelo = CATEGORIA_TIPO_A_MODELO.get(cat_local, cat_local)
+        if cat_local not in tabla and cat_modelo in tabla_modelo:
+            tabla[cat_local] = tabla_modelo[cat_modelo]
+    return tabla
+
+
+CATEGORIAS = sorted(
+    set(CATEGORIAS_LOCALES_RAW)
+    | set(MONTO_BASE_CATEGORIA_MODELO)
+    | set(PRIORIDAD_MULT_COSTO_MODELO)
+    | set(PRIORIDAD_RED_MAX_MIN_MODELO)
+)
+
+# Precio típico por categoría (ARS ficticios; nivel medio del ticket).
+MONTO_BASE_CATEGORIA = _expande_por_categoria_local(MONTO_BASE_CATEGORIA_MODELO)
+PRIORIDAD_MULT_COSTO = _expande_por_categoria_local(PRIORIDAD_MULT_COSTO_MODELO)
+PRIORIDAD_RED_MAX_MIN = _expande_por_categoria_local(PRIORIDAD_RED_MAX_MIN_MODELO)
 
 
 def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -468,11 +520,52 @@ def parse_fecha_arg(s: str, fin_del_dia: bool) -> datetime:
 
 
 def sample_fecha_pedido(rng: np.random.Generator, dt_min: datetime, dt_max: datetime) -> datetime:
-    """Momento aleatorio uniforme entre dt_min y dt_max (inclusive)."""
-    span = (dt_max - dt_min).total_seconds()
-    if span <= 0:
+    """Momento aleatorio ponderado por mes, día de semana y hora."""
+    if dt_max <= dt_min:
         return dt_min
-    return dt_min + timedelta(seconds=float(rng.uniform(0.0, span)))
+
+    fecha_min = dt_min.date()
+    fecha_max = dt_max.date()
+    n_dias = (fecha_max - fecha_min).days + 1
+    if n_dias <= 1:
+        delta_seg = max(0.0, (dt_max - dt_min).total_seconds())
+        return dt_min + timedelta(seconds=float(rng.uniform(0.0, delta_seg)))
+
+    dias = [fecha_min + timedelta(days=i) for i in range(n_dias)]
+    pesos_dias = np.array(
+        [PESO_MES.get(d.month, 1.0) * PESO_DIA_SEMANA.get(d.weekday(), 1.0) for d in dias],
+        dtype=float,
+    )
+    if not np.isfinite(pesos_dias).all() or float(pesos_dias.sum()) <= 0.0:
+        pesos_dias = np.full(n_dias, 1.0 / n_dias)
+    else:
+        pesos_dias = pesos_dias / pesos_dias.sum()
+
+    pesos_hora = PESO_HORA.astype(float)
+    if pesos_hora.shape[0] != 24 or not np.isfinite(pesos_hora).all() or float(pesos_hora.sum()) <= 0.0:
+        pesos_hora = np.ones(24, dtype=float)
+    pesos_hora = pesos_hora / pesos_hora.sum()
+
+    for _ in range(5000):
+        idx_dia = int(rng.choice(n_dias, p=pesos_dias))
+        d = dias[idx_dia]
+        hora = int(rng.choice(24, p=pesos_hora))
+        minuto = int(rng.integers(0, 60))
+        segundo = int(rng.integers(0, 60))
+        fecha = datetime(
+            year=d.year,
+            month=d.month,
+            day=d.day,
+            hour=hora,
+            minute=minuto,
+            second=segundo,
+        )
+        if dt_min <= fecha <= dt_max:
+            return fecha
+
+    # Fallback defensivo (rangos muy estrechos en extremos del intervalo).
+    delta_seg = max(0.0, (dt_max - dt_min).total_seconds())
+    return dt_min + timedelta(seconds=float(rng.uniform(0.0, delta_seg)))
 
 
 def parse_args() -> argparse.Namespace:
